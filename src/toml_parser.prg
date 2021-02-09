@@ -235,7 +235,7 @@ Define Class TomlParser As Custom
 			this.next_token()
 			return .t.
 		else
-			this.append_error('expected next token to be ' + transform(token_type) + ', got ' + transform(this.peek_token.type) + ' instead'
+			this.append_error('expected next token to be ' + transform(token_type) + ', got ' + transform(this.peek_token.type) + ' instead')
 			return .f.
 		endif
 	endfunc
