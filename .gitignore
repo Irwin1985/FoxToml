@@ -1,3 +1,7 @@
 
 FoxToml.pjx
 FoxToml.PJT
+src/toml_parser.ERR
+src/sample.toml
+src/parser.ERR
+src/sample.toml

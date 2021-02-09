@@ -1,55 +1,35 @@
-clear
 #include toml.h
-
-&&>Test
-cd f:\desarrollo\github\foxtoml\src
-*set step on
-lexer = createobject("lexer", filetostr("sample.toml"))
-tok = lexer.get_next_token()
-do while tok.type != T_EOF
-	?"Type:", "'" + transform(tok.type) + "'", "Value:", tok.value
-	tok = lexer.get_next_token()
-enddo
-&&<Test
-
-define class lexer as Custom
-	text = ''
+define class TomlLexer as custom
+	source = ''
 	pos = 0
 	line = 0
 	col = 0
 	current_char = ''
-	dimension keywords(2)
-	
-	function init(text)
-		this.text = text
+	last_token = .Null.
+
+	function last_token_access
+		if isnull(this.last_token)
+			return this.new_token(T_EOF, T_NONE)
+		else
+			return this.last_token
+		endif
+	endfunc
+	function init(source)
+		this.source = iif(right(source, 1) != LF, source + CR + LF, source)
 		this.pos = 1
-		this.current_char = substr(this.text, this.pos, 1)
+		this.current_char = substr(this.source, this.pos, 1)
 		this.line = 1
 		this.col = 1
-		this.build_keywords()
-	endfunc
-	function build_keywords
-		dimension this.keywords(1)
-		this.keywords(1) = 'true'
-		dimension this.keywords(2)
-		this.keywords(2) = 'false'		
-	endfunc
-	function is_keyword(ident)
-		if ascan(this.keywords, ident) > 0
-			return T_KEYWORD
-		else
-			return T_IDENT
-		endif
 	endfunc
 	function lexer_error
 		error "Unknown character '" + transform(this.current_char) + "'"
 	endfunc
 	function advance
 		this.pos = this.pos + 1
-		if this.pos > len(this.text)
+		if this.pos > len(this.source)
 			this.current_char = T_NONE
 		else
-			this.current_char = substr(this.text, this.pos, 1)
+			this.current_char = substr(this.source, this.pos, 1)
 			this.col = this.col + 1
 		endif
 		if this.current_char == LF
@@ -58,35 +38,39 @@ define class lexer as Custom
 		endif
 	endfunc
 	function peek
+		local peek_pos
 		peek_pos = this.pos + 1
-		if peek_pos > len(this.text)
+		if peek_pos > len(this.source)
 			return T_NONE
 		else
-			return substr(this.text, peek_pos, 1)
+			return substr(this.source, peek_pos, 1)
 		endif
 	endfunc
+	function is_number(ch)
+		return isdigit(ch) or inlist(ch, '-', '.')
+	endfunc
 	function is_letter(ch)
-		return isalpha(ch) or ch == '_'
+		return isalpha(ch) or isdigit(ch) or ch == '_' or ch == '-'
 	endfunc
 	function skip_whitespace
-		do while this.current_char != T_NONE and this.current_char == T_SPACE
+		do while this.current_char != T_NONE and inlist(this.current_char, T_SPACE, T_TAB)
 			this.advance()
 		enddo
 	endfunc
 	function skip_comments
-		do while this.current_char != T_NONE and this.current_char != LF
+		do while this.current_char != LF
 			this.advance()
 		enddo
 		if this.current_char == T_NONE
 			error "Unexpected End Of File"
 		endif
-		this.advance() && eat LF
+		this.advance()
 	endfunc
 	function string
+		local result
 		result = ''
 		this.advance() && eat begining "
 		do while this.current_char != T_NONE
-			&& "hola\r\nmundo"
 			if this.current_char == '\'
 				peek_char = this.advance()
 				do case
@@ -117,36 +101,44 @@ define class lexer as Custom
 		return this.new_token(T_STRING, result)
 	endfunc
 	function number
+		LOCAL result, token_type
 		result = ''
-		do while this.current_char != T_NONE and isdigit(this.current_char)
+		token_type = T_NUMBER
+		do while this.current_char != T_NONE and this.is_number(this.current_char)
 			result = result + this.current_char
 			this.advance()
 		enddo
-		if this.current_char == '.' and isdigit(this.peek())
-			do while this.current_char != T_NONE and isdigit(this.current_char)
-				result = result + this.current_char
-				this.advance()
-			enddo
+		if at('-', result) > 0
+			return this.new_token(T_DATE, result)
+		else			
+			return this.new_token(T_NUMBER, val(result))
 		endif
-		return this.new_token(T_NUMBER, val(result))
 	endfunc
 	function identifier
+		LOCAL result, token_type
 		result = ''
+		token_type = T_IDENT
 		do while this.current_char != T_NONE and this.is_letter(this.current_char)
 			result = result + this.current_char
 			this.advance()
 		enddo
-		return this.new_token(this.is_keyword(result), result) 
+		
+		if inlist(result, 'false', 'true')
+			token_type = T_BOOLEAN
+		endif
+		return this.new_token(token_type, result)
 	endfunc
 	function new_token(type, value)
+		LOCAL token
 		token = createobject("empty")
 		addproperty(token, "type", type)
 		addproperty(token, "value", value)
+		this.last_token = token
 		return token
 	endfunc
 	function get_next_token
 		do while this.current_char != T_NONE
-			if this.current_char == T_SPACE
+			if inlist(this.current_char, T_SPACE, T_TAB)
 				this.skip_whitespace()
 				loop
 			endif
@@ -191,19 +183,20 @@ define class lexer as Custom
 				this.advance()
 				return this.new_token(T_COLON, ':')
 			endif
-			if this.current_char == '-'
-				this.advance()
-				return this.new_token(T_DASH, '-')
-			endif
 			if this.current_char == ','
 				this.advance()
 				return this.new_token(T_COMMA, ',')
 			endif
-			if this.current_char == chr(13)
+			if this.current_char == CR
 				this.advance() && eat CR
 				this.advance() && eat LF
-				return this.new_token(T_NEW_LINE, T_NEW_LINE)
-			endif			
+				if !isnull(this.last_token) and this.last_token.type != T_NEW_LINE
+					return this.new_token(T_NEW_LINE, T_NEW_LINE)
+				else					
+					* skip aditional CR and LF
+					loop
+				endif
+			endif
 			this.lexer_error()
 		enddo
 		return this.new_token(T_EOF, T_NONE)
